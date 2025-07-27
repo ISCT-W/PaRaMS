@@ -3,3 +3,9 @@
 \data\
 *\__pycache__\
 .idea\
+USAGE.md
+.vscode/sftp.json
+*.pyc
+*.json
+*.pkl
+*.log
