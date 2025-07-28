@@ -7,15 +7,14 @@ import tqdm
 from src.datasets.common import maybe_dictionarize, get_dataloader_shuffle
 from src.datasets.registry import get_dataset
 from src.task_vectors.utils import create_log_dir
-
-work_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../'))
-os.chdir(work_dir)
-sys.path.append(work_dir)
-
 from src.task_vectors.args import parse_arguments
 from src.task_vectors.eval import eval_single_dataset_preprocess_head
 from src.task_vectors.task_vectors import TaskVector
 from src.task_vectors.heads import get_classification_head
+from src.config.paths import (
+    get_checkpoint_path, get_modified_model_path, get_evaluation_log_path,
+    ensure_dir_exists, print_path_config, validate_paths, DATA_ROOT
+)
 
 
 def del_attr(obj, names):
@@ -144,8 +143,15 @@ class AdaMerging(torch.nn.Module):
 
 
 if __name__ == "__main__":
+    # Validate paths before starting
+    if not validate_paths():
+        print("❌ Path validation failed. Please check your configuration in src/config/paths.py")
+        exit(1)
+    
+    print_path_config()
+    
     args = parse_arguments()
-    args.data_location = 'data'
+    args.data_location = DATA_ROOT
     exam_datasets_all = ['Cars', 'RESISC45', 'EuroSAT', 'SVHN', 'GTSRB', 'MNIST', 'DTD']
     models = ['ViT-B-16', 'ViT-B-32', 'ViT-L-14']
     for victim_task in exam_datasets_all:
@@ -155,14 +161,19 @@ if __name__ == "__main__":
             cur_tasks = [victim_task, free_rider_task]
             for model in models:
                 args.model = model
-                args.save = f'checkpoints/{model}'
-                args.logs_path = f'logs/{model}/{victim_task}/free_rider_{free_rider_task}/'
-                os.makedirs(os.path.dirname(args.logs_path), exist_ok=True)
+                args.save = get_checkpoint_path(model, 'temp').replace('/temp/finetuned.pt', '')  # Get base checkpoint dir
+                
+                # Use new evaluation log path with AdaMerging naming
+                protection_type = 'perm-scaling'
+                log_file_path = get_evaluation_log_path('AdaMerging', model, victim_task, protection_type)
+                args.logs_path = os.path.dirname(log_file_path)
+                ensure_dir_exists(args.logs_path)
 
-                pretrained_checkpoint = f'checkpoints/{model}/zeroshot.pt'
-                free_rider_checkpoint = f'checkpoints/{model}/{free_rider_task}/finetuned.pt'
-                victim_task_checkpoint = f'checkpoints/{model}/{victim_task}/finetuned.pt'
-                victim_PaRaMSed_checkpoint = f'modified_models/{model}/{victim_task}/perm_scaling/{victim_task}_PaRaMSed.pt'
+                # Use centralized path configuration
+                pretrained_checkpoint = get_checkpoint_path(model, 'zeroshot')
+                free_rider_checkpoint = get_checkpoint_path(model, free_rider_task, 'finetuned')
+                victim_task_checkpoint = get_checkpoint_path(model, victim_task, 'finetuned')
+                victim_PaRaMSed_checkpoint = get_modified_model_path(model, victim_task, 'perm_scaling', 'scaling')
                 benign_task_vectors = [TaskVector(pretrained_checkpoint, victim_task_checkpoint),
                                        TaskVector(pretrained_checkpoint, free_rider_checkpoint)]
                 PaRaMSed_task_vectors = [TaskVector(pretrained_checkpoint, victim_PaRaMSed_checkpoint),
@@ -171,7 +182,7 @@ if __name__ == "__main__":
                 pretrained_encoder = torch.load(pretrained_checkpoint)
                 pretrained_model_dic = pretrained_encoder.state_dict()
 
-                log = create_log_dir(args.logs_path, f'LayerWiseAdaMerging_log.txt')
+                log = create_log_dir(args.logs_path, os.path.basename(log_file_path))
                 args.log = log
                 model = ModelWrapper(pretrained_encoder, cur_tasks)
                 model = model.to(args.device)

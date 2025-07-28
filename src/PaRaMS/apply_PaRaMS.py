@@ -9,33 +9,75 @@ using the new unified interface with different scaling variants.
 import sys
 import os
 import argparse
-
-work_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../'))
-os.chdir(work_dir)
-sys.path.append(work_dir)
+import warnings
 
 import numpy as np
 import torch
 
-import src.PaRaMS.PaRaMS as PaRaMS
-from src.task_vectors.args import parse_arguments
+# Suppress torch.load FutureWarning about weights_only
+warnings.filterwarnings("ignore", message="You are using `torch.load` with `weights_only=False`")
+warnings.filterwarnings("ignore", category=FutureWarning, module="torch")
 
-def apply_params_protection(victim_task, model, enable_perm=True, enable_scaling=True, scaling_type='diagonal', output_dir='modified_models'):
+
+# Add project root to path for module imports
+import sys
+from pathlib import Path
+
+# Find project root - look for setup.py or requirements.txt as markers
+current_path = Path(__file__).absolute()
+project_root = None
+for parent in [current_path.parent.parent.parent, Path.cwd()]:
+    if (parent / 'setup.py').exists() or (parent / 'requirements.txt').exists():
+        project_root = parent
+        break
+
+if project_root is None:
+    # Fallback to 3 levels up from this file
+    project_root = current_path.parent.parent.parent
+
+if str(project_root) not in sys.path:
+    sys.path.insert(0, str(project_root))
+
+from src.PaRaMS.PaRaMS_algorithm import params as PaRaMS_params
+from src.task_vectors.args import parse_arguments
+from src.task_vectors.utils import create_log_dir
+from src.config.paths import (
+    get_checkpoint_path, get_modified_model_path, get_modification_log_path,
+    ensure_dir_exists, print_path_config, validate_paths
+)
+
+def apply_params_protection(victim_task, model, enable_perm=True, enable_scaling=True, scaling_type='diagonal'):
     """Apply PaRaMS protection to a specific model and task"""
     
     layers = 12 if model in ['ViT-B-16', 'ViT-B-32'] else 24
     
-    # Model paths
-    victim_task_checkpoint = f'checkpoints/{model}/{victim_task}/finetuned.pt'
-    pretrained_checkpoint = f'checkpoints/{model}/zeroshot.pt'
+    # Model paths using centralized path configuration
+    victim_task_checkpoint = get_checkpoint_path(model, victim_task, 'finetuned')
+    pretrained_checkpoint = get_checkpoint_path(model, 'zeroshot')
     
-    print(f"\n Applying PaRaMS:")
-    print(f"   Task: {victim_task}")
-    print(f"   Model: {model}")
-    print(f"   Permutation: {enable_perm}")
-    print(f"   Scaling: {enable_scaling} ({scaling_type})")
+    # Determine protection type for logging
+    if enable_perm and enable_scaling:
+        protection_type = f'perm_{scaling_type}'
+    elif enable_perm:
+        protection_type = 'perm_only'
+    elif enable_scaling:
+        protection_type = f'{scaling_type}_only'
+    else:
+        protection_type = 'unprotected'
     
-    # Load models
+    # Create log file for this protection process
+    log_path = get_modification_log_path(model, victim_task, protection_type)
+    ensure_dir_exists(os.path.dirname(log_path))
+    log = create_log_dir(os.path.dirname(log_path), os.path.basename(log_path))
+    
+    # Log and print protection info
+    protection_info = f"Applying PaRaMS protection: {model}/{victim_task} with {scaling_type} (perm: {enable_perm})"
+    log.info(protection_info)
+    log.info(f"Source checkpoint: {victim_task_checkpoint}")
+    log.info(f"Pretrained checkpoint: {pretrained_checkpoint}")
+    log.info(f"Protection configuration: perm={enable_perm}, scaling={enable_scaling}, type={scaling_type}")
+    
+    # Load models with proper error handling
     victim_encoder = torch.load(victim_task_checkpoint)
     pretrained_encoder = torch.load(pretrained_checkpoint)
     
@@ -74,7 +116,7 @@ def apply_params_protection(victim_task, model, enable_perm=True, enable_scaling
         raise ValueError(f"Unknown scaling_type: {scaling_type}")
     
     # Apply PaRaMS protection using the unified interface
-    protected_params = PaRaMS.params(
+    protected_params = PaRaMS_params(
         model_state_dict=victim_encoder.state_dict(),
         pretrained_state_dict=pretrained_encoder.state_dict() if enable_perm else None,
         num_layers=layers,
@@ -87,60 +129,60 @@ def apply_params_protection(victim_task, model, enable_perm=True, enable_scaling
     # Load the protected parameters back to the model
     victim_encoder.load_state_dict(protected_params)
     
-    # Create save path based on protection methods used
-    save_path = f'{output_dir}/{model}/{victim_task}/'
-    if enable_perm and enable_scaling:
-        save_path += f'perm_{scaling_type}/'
-    elif enable_perm:
-        save_path += 'perm_only/'
-    elif enable_scaling:
-        save_path += f'{scaling_type}_only/'
+    # Get save path using centralized path configuration
+    save_model = get_modified_model_path(model, victim_task, protection_type, scaling_type)
+    ensure_dir_exists(os.path.dirname(save_model))
+    
+    # Save model - prefer saving state_dict for better compatibility
+    if hasattr(victim_encoder, '_state_dict'):
+        # This is our wrapper class, save the state dict
+        torch.save(victim_encoder._state_dict, save_model)
+        log.info("Saved model as state_dict for better compatibility")
     else:
-        save_path += 'unprotected/'
+        # This is a full model object
+        torch.save(victim_encoder, save_model)
     
-    os.makedirs(save_path, exist_ok=True)
-    model_name = f'{victim_task}_PaRaMSed_{scaling_type}.pt'
-    save_model = os.path.join(save_path, model_name)
-    torch.save(victim_encoder, save_model)
-    print(f"Protected model saved to: {save_model}")
+    # Log and print completion info
+    completion_info = f"Protected model saved: {save_model}"
+    print(f"✅ {os.path.basename(save_model)}")
+    log.info(completion_info)
+    log.info(f"Protection completed successfully for {victim_task}")
     
-    return save_model
+    return save_model, log
 
 
-def parse_protection_args():
-    """Parse command line arguments for PaRaMS protection"""
-    parser = argparse.ArgumentParser(description='Apply PaRaMS protection to models')
-    parser.add_argument('--tasks', nargs='+', default=['Cars', 'RESISC45', 'EuroSAT', 'SVHN', 'GTSRB', 'MNIST', 'DTD'], 
-                       help='List of tasks to protect (default: Cars)')
-    parser.add_argument('--models', nargs='+', default=['ViT-B-32'],
-                       help='List of models to protect (default: ViT-B-32)')
-    parser.add_argument('--scaling-types', nargs='+', 
-                       choices=['diagonal', 'symmetric', 'nonsymmetric'],
-                       default=['nonsymmetric'],
-                       help='Scaling types to apply (default: nonsymmetric)')
-    parser.add_argument('--no-permutation', action='store_true',
-                       help='Disable permutation protection', default=False)
-    parser.add_argument('--no-scaling', action='store_true', 
-                       help='Disable scaling protection', default=False)
-    parser.add_argument('--output-dir', default='modified_models',
-                       help='Output directory for protected models')
-    return parser.parse_args()
+# Removed duplicate parser - now using the unified one from src.task_vectors.args
 
 
 if __name__ == "__main__":
-    # Parse both task vector args and protection args
-    protection_args = parse_protection_args()
+    # Use the unified parser from task_vectors.args
     args = parse_arguments()
     
     # Configuration from command line arguments
-    victim_tasks = protection_args.tasks
-    models = protection_args.models
-    scaling_types = protection_args.scaling_types
-    perm_settings = [not protection_args.no_permutation]
-    scaling_settings = [not protection_args.no_scaling]
+    victim_tasks = args.tasks if args.tasks else ['Cars']
+    models = args.models if args.models else ['ViT-B-32'] 
+    
+    # Handle scaling types - use scaling_types if provided, otherwise use scaling_type
+    if args.scaling_types:
+        scaling_types = args.scaling_types
+    else:
+        scaling_types = [args.scaling_type]
+    
+    perm_settings = [not args.no_permutation]
+    scaling_settings = [not args.no_scaling]
 
-    # Set up arguments for task vectors
-    args.data_location = 'data'
+    # Validate paths before starting
+    if not validate_paths():
+        print(" Path validation failed. Please check your configuration in src/config/paths.py")
+        exit(1)
+    
+    # Print current path configuration
+    print_path_config()
+    
+    # Set up data location from config if not provided
+    if not hasattr(args, 'data_location') or not args.data_location:
+        from src.config.paths import DATA_ROOT
+        args.data_location = DATA_ROOT
     
     print("PaRaMS Protection Suite")
     print("Applying all three scaling variants for comprehensive protection")
@@ -158,31 +200,29 @@ if __name__ == "__main__":
                     if scaling:
                         for scaling_type in scaling_types:
                             try:
-                                saved_model = apply_params_protection(
+                                saved_model, log = apply_params_protection(
                                     victim_task=victim_task,
                                     model=model,
                                     enable_perm=perm,
                                     enable_scaling=scaling,
-                                    scaling_type=scaling_type,
-                                    output_dir=protection_args.output_dir
+                                    scaling_type=scaling_type
                                 )
                                 total_models += 1
                             except Exception as e:
-                                print(f"Error protecting {victim_task} with {scaling_type}: {e}")
+                                print(f" Error protecting {victim_task} with {scaling_type}: {e}")
                     else:
                         # When scaling is disabled, just apply permutation
                         try:
-                            saved_model = apply_params_protection(
+                            saved_model, log = apply_params_protection(
                                 victim_task=victim_task,
                                 model=model,
                                 enable_perm=perm,
                                 enable_scaling=False,
-                                scaling_type='none',
-                                output_dir=protection_args.output_dir
+                                scaling_type='none'
                             )
                             total_models += 1
                         except Exception as e:
-                            print(f"Error protecting {victim_task} (perm only): {e}")
+                            print(f" Error protecting {victim_task} (perm only): {e}")
     
     print("\n" + "="*80)
     print(f"Protection completed! Generated {total_models} protected models")
@@ -190,7 +230,8 @@ if __name__ == "__main__":
     print("• Diagonal scaling: Fast, basic protection")
     print("• Symmetric scaling: Balanced protection and performance") 
     print("• Nonsymmetric scaling: Maximum protection against sophisticated attacks")
-    print(f"\nAll models saved in {protection_args.output_dir}/ directory with descriptive names")
+    from src.config.paths import MODIFIED_MODELS_ROOT
+    print(f"\nAll models saved in {MODIFIED_MODELS_ROOT}/ directory with descriptive names")
     print("You can now evaluate the protection effectiveness against different merging attacks!")
     print("\nUsage examples:")
     print("  python apply_PaRaMS.py --tasks Cars DTD --models ViT-B-32 --scaling-types diagonal")

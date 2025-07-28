@@ -4,17 +4,24 @@ import sys
 import torch
 
 from src.eval_merging.bin_layerwise_adamerging_fromscratch import create_log_dir
-
-work_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../'))
-os.chdir(work_dir)
-sys.path.append(work_dir)
-
 from src.task_vectors.args import parse_arguments
 from src.task_vectors.eval import eval_single_dataset
 from src.task_vectors.task_vectors import TaskVector
+from src.config.paths import (
+    get_checkpoint_path, get_modified_model_path, get_evaluation_log_path,
+    ensure_dir_exists, print_path_config, validate_paths, DATA_ROOT
+)
+
+# Validate paths before starting
+if not validate_paths():
+    print(" Path validation failed. Please check your configuration in src/config/paths.py")
+    exit(1)
+
+# Print current path configuration
+print_path_config()
 
 args = parse_arguments()
-args.data_location = 'data'
+args.data_location = DATA_ROOT
 exam_datasets_all = ['Cars', 'RESISC45', 'EuroSAT', 'SVHN', 'GTSRB', 'MNIST', 'DTD']
 models = ['ViT-B-16', 'ViT-B-32', 'ViT-L-14']
 scaling_factors = [0.3, 0.4, 0.5, 0.6, 0.7, 0.8]
@@ -24,16 +31,23 @@ for victim_task in exam_datasets_all:
             continue
         for model in models:
             args.model = model
-            args.save = f'checkpoints/{model}'
-            args.logs_path = f'logs/{model}/{victim_task}/free_rider_{free_rider_task}/'
-            os.makedirs(os.path.dirname(args.logs_path), exist_ok=True)
+            args.save = get_checkpoint_path(model, 'temp').replace('/temp/finetuned.pt', '')  # Get base checkpoint dir
+            
+            # Determine protection type from modified model path
+            # Assume we're using perm_scaling for now (can be made configurable)
+            protection_type = 'perm-scaling'
+            
+            # Use new evaluation log path with TA naming
+            log_file_path = get_evaluation_log_path('TA', model, victim_task, protection_type)
+            args.logs_path = os.path.dirname(log_file_path)
+            ensure_dir_exists(args.logs_path)
 
-            victim_task_checkpoint = f'checkpoints/{model}/{victim_task}/finetuned.pt'
-            victim_PaRaMSed_checkpoint = f'modified_models/{model}/{victim_task}/perm_scaling/{victim_task}_PaRaMSed.pt'
-            free_rider_checkpoint = f'checkpoints/{model}/{free_rider_task}/finetuned.pt'
-            pretrained_checkpoint = f'checkpoints/{model}/zeroshot.pt'
+            victim_task_checkpoint = get_checkpoint_path(model, victim_task, 'finetuned')
+            victim_PaRaMSed_checkpoint = get_modified_model_path(model, victim_task, 'perm_scaling', 'scaling')
+            free_rider_checkpoint = get_checkpoint_path(model, free_rider_task, 'finetuned')
+            pretrained_checkpoint = get_checkpoint_path(model, 'zeroshot')
 
-            log = create_log_dir(args.logs_path, f'TaskArithmetic_log.txt')
+            log = create_log_dir(args.logs_path, os.path.basename(log_file_path))
 
             victim_benign_task_vector = TaskVector(pretrained_checkpoint, victim_task_checkpoint)
             victim_PaRaMSed_task_vector = TaskVector(pretrained_checkpoint, victim_PaRaMSed_checkpoint)

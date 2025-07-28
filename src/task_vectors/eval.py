@@ -17,6 +17,10 @@ def eval_single_dataset(image_encoder, dataset_name, args):
     model = ImageClassifier(image_encoder, classification_head)
 
     model.eval()
+    
+    # Move model to GPU
+    device = args.device
+    model = model.to(device)
 
     dataset = get_dataset(
         dataset_name,
@@ -26,7 +30,6 @@ def eval_single_dataset(image_encoder, dataset_name, args):
     )
     dataloader = get_dataloader(
         dataset, is_train=False, args=args, image_encoder=None)
-    device = args.device
 
     with torch.no_grad():
         top1, correct, n = 0., 0., 0.
@@ -55,10 +58,13 @@ def eval_single_dataset_head(image_encoder, head, dataset_name, args):
     model = ImageClassifier(image_encoder, head)
 
     model.eval()
+    
+    # Move model to GPU
+    device = args.device
+    model = model.to(device)
 
     dataset = get_dataset(dataset_name, model.val_preprocess, location=args.data_location, batch_size=args.batch_size)
     dataloader = get_dataloader(dataset, is_train=False, args=args, image_encoder=None)
-    device = args.device
 
     with torch.no_grad():
         top1, correct, n = 0., 0., 0.
@@ -87,10 +93,13 @@ def eval_single_dataset_preprocess_head(image_encoder, head, dataset_name, args)
     model = ImageClassifier(image_encoder, head)
 
     model.eval()
+    
+    # Move model to GPU
+    device = args.device
+    model = model.to(device)
 
     dataset = get_dataset(dataset_name, model.val_preprocess, location=args.data_location, batch_size=args.batch_size)
     dataloader = get_dataloader(dataset, is_train=False, args=args, image_encoder=None)
-    device = args.device
 
     with torch.no_grad():
         top1, correct, n = 0., 0., 0.

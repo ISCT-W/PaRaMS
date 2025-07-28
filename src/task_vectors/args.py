@@ -134,6 +134,74 @@ def parse_arguments():
         default='/gscratch/efml/gamaga/.cache/open_clip',
         help='Directory for caching models from OpenCLIP'
     )
+    
+    # PaRaMS specific arguments
+    parser.add_argument(
+        "--scaling-type",
+        type=str,
+        choices=['diagonal', 'symmetric', 'nonsymmetric'],
+        default='nonsymmetric',
+        help='Type of attention scaling to apply (default: nonsymmetric)'
+    )
+    parser.add_argument(
+        "--scaling-types",
+        nargs='+',
+        choices=['diagonal', 'symmetric', 'nonsymmetric'],
+        default=None,
+        help='Multiple scaling types to apply (overrides --scaling-type)'
+    )
+    parser.add_argument(
+        "--tasks",
+        nargs='+',
+        default=None,
+        help='List of tasks to process (for batch operations)'
+    )
+    parser.add_argument(
+        "--models",
+        nargs='+',
+        default=None,
+        help='List of models to process (for batch operations)'
+    )
+    parser.add_argument(
+        "--no-permutation",
+        action='store_true',
+        help='Disable permutation protection',
+        default=False
+    )
+    parser.add_argument(
+        "--no-scaling",
+        action='store_true',
+        help='Disable scaling protection',
+        default=False
+    )
+    
+    # Auto evaluation specific arguments
+    parser.add_argument(
+        "--victim-task",
+        type=str,
+        choices=['Cars', 'RESISC45', 'EuroSAT', 'SVHN', 'GTSRB', 'MNIST', 'DTD'],
+        help='Victim task to evaluate (for auto evaluation)'
+    )
+    parser.add_argument(
+        "--protection-types",
+        nargs='+',
+        choices=['diagonal', 'symmetric', 'nonsymmetric'],
+        default=None,
+        help='PaRaMS protection types to evaluate (for auto evaluation)'
+    )
+    parser.add_argument(
+        "--scaling-factors",
+        nargs='+',
+        type=float,
+        default=None,
+        help='Task arithmetic scaling factors to test (for auto evaluation)'
+    )
+    parser.add_argument(
+        "--summary-only",
+        action='store_true',
+        help='Only print summary without running evaluation',
+        default=False
+    )
     parsed_args = parser.parse_args()
     parsed_args.device = "cuda" if torch.cuda.is_available() else "cpu"
     

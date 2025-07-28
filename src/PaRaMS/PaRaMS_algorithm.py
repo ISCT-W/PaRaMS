@@ -64,7 +64,7 @@ def parameter_rearrangement(
     params_b: Dict[str, torch.Tensor], 
     max_iter: int = 200, 
     obj: str = 'mismatching',
-    tolerance: int = 10
+    tolerance: int = 1
 ) -> Tuple[Dict[str, torch.Tensor], list, list, list]:
     """
     MLP Parameter rearrangement to find optimal permutation that disrupts model merging.
@@ -577,7 +577,7 @@ def params(
         perm_config = {
             'max_iter': 200,
             'obj': 'mismatching',
-            'tolerance': 10
+            'tolerance': 1
         }
     
     if scaling_config is None:

@@ -1,0 +1,49 @@
+# Core ML and Scientific Computing
+torch>=2.0.0
+torchvision>=0.15.0
+numpy>=1.21.0
+scipy>=1.7.0
+
+# JAX for PaRaMS implementation
+jax>=0.4.0
+jaxlib>=0.4.0
+
+# Computer Vision and CLIP
+open-clip-torch==2.0.2
+Pillow>=8.3.0
+
+# Progress bars and utilities
+tqdm>=4.62.0
+
+# Development and optional dependencies
+# Uncomment if you need Jupyter notebooks
+# jupyter>=1.0.0
+# ipykernel>=6.0.0
+
+# For dataset downloading (if needed)
+# requests>=2.25.0
+# urllib3>=1.26.0
+
+# =============================================================================
+# Installation Notes:
+# =============================================================================
+# 
+# 1. For CUDA support (recommended for GPU training):
+#    pip install torch torchvision --index-url https://download.pytorch.org/whl/cu118
+#
+# 2. For JAX with CUDA support:
+#    pip install "jax[cuda12_pip]" -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
+#
+# 3. Install requirements:
+#    pip install -r requirements.txt
+#
+# 4. For development environment:
+#    pip install -r requirements-dev.txt
+#
+# =============================================================================
+# Version Compatibility:
+# =============================================================================
+# - Python >= 3.8
+# - CUDA >= 11.8 (for GPU support)
+# - JAX and PyTorch should be compatible versions
+# =============================================================================

@@ -9,3 +9,9 @@ USAGE.md
 *.json
 *.pkl
 *.log
+src/config/__init__.py
+PATH_CONFIGURATION.md
+.dockerignore
+*/.gitkeep
+results/evaluation/.gitkeep
+results/modification/.gitkeep

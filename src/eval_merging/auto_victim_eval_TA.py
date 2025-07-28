@@ -8,22 +8,45 @@ and logs comprehensive evaluation results.
 """
 
 import os
-import sys
 import argparse
 import json
+import warnings
 from datetime import datetime
 from typing import List, Dict, Optional
 
 import torch
 
-work_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../'))
-os.chdir(work_dir)
-sys.path.append(work_dir)
+# Suppress torch.load FutureWarning about weights_only
+warnings.filterwarnings("ignore", message="You are using `torch.load` with `weights_only=False`")
+warnings.filterwarnings("ignore", category=FutureWarning, module="torch")
+
+# Add project root to path for module imports
+import sys
+from pathlib import Path
+
+# Find project root - look for setup.py or requirements.txt as markers
+current_path = Path(__file__).absolute()
+project_root = None
+for parent in [current_path.parent.parent.parent, Path.cwd()]:
+    if (parent / 'setup.py').exists() or (parent / 'requirements.txt').exists():
+        project_root = parent
+        break
+
+if project_root is None:
+    # Fallback to 3 levels up from this file
+    project_root = current_path.parent.parent.parent
+
+if str(project_root) not in sys.path:
+    sys.path.insert(0, str(project_root))
 
 from src.task_vectors.args import parse_arguments
 from src.task_vectors.eval import eval_single_dataset
 from src.task_vectors.task_vectors import TaskVector
 from src.task_vectors.utils import create_log_dir
+from src.config.paths import (
+    get_checkpoint_path, get_modified_model_path, get_evaluation_log_path,
+    ensure_dir_exists, print_path_config, validate_paths, DATA_ROOT
+)
 
 
 class AutoVictimEvaluator:
@@ -36,9 +59,8 @@ class AutoVictimEvaluator:
     """
     
     def __init__(self, victim_task: str, model: str, 
-                 scaling_factors: List[float] = None,
-                 protection_types: List[str] = None,
-                 output_dir: str = "logs"):
+                 scaling_factors: Optional[List[float]] = None,
+                 protection_types: Optional[List[str]] = None):
         """
         Initialize the automated victim evaluator.
         
@@ -47,13 +69,11 @@ class AutoVictimEvaluator:
             model (str): Model architecture (e.g., 'ViT-B-32', 'ViT-B-16', 'ViT-L-14')
             scaling_factors (List[float]): Task arithmetic scaling factors to test
             protection_types (List[str]): PaRaMS protection variants to evaluate
-            output_dir (str): Base directory for log output
         """
         self.victim_task = victim_task
         self.model = model
         self.scaling_factors = scaling_factors or [0.3, 0.4, 0.5, 0.6, 0.7, 0.8]
-        self.protection_types = protection_types or ['nonsymmetric', 'symmetric', 'diagonal']
-        self.output_dir = output_dir
+        self.protection_types = protection_types or ['nonsymmetric']
         
         # All available tasks (excluding victim)
         self.all_tasks = ['Cars', 'RESISC45', 'EuroSAT', 'SVHN', 'GTSRB', 'MNIST', 'DTD']
@@ -61,9 +81,9 @@ class AutoVictimEvaluator:
         
         # Initialize arguments
         self.args = parse_arguments()
-        self.args.data_location = 'data'
+        self.args.data_location = DATA_ROOT
         self.args.model = model
-        self.args.save = f'checkpoints/{model}'
+        self.args.save = get_checkpoint_path(model, 'temp').replace('/temp/finetuned.pt', '')  # Get base checkpoint dir
         
         # Create timestamp for this evaluation session
         self.timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -82,23 +102,22 @@ class AutoVictimEvaluator:
         
     def _get_checkpoint_paths(self, free_rider_task: str, protection_type: str = None) -> Dict[str, str]:
         """Get file paths for different model checkpoints."""
-        base_path = f'checkpoints/{self.model}'
-        
         paths = {
-            'victim_benign': f'{base_path}/{self.victim_task}/finetuned.pt',
-            'free_rider': f'{base_path}/{free_rider_task}/finetuned.pt',
-            'pretrained': f'{base_path}/zeroshot.pt'
+            'victim_benign': get_checkpoint_path(self.model, self.victim_task, 'finetuned'),
+            'free_rider': get_checkpoint_path(self.model, free_rider_task, 'finetuned'),
+            'pretrained': get_checkpoint_path(self.model, 'zeroshot')
         }
         
         if protection_type:
-            if protection_type == 'nonsymmetric':
-                # Use new naming convention from updated apply_PaRaMS.py
-                paths['victim_protected'] = f'modified_models/{self.model}/{self.victim_task}/perm_{protection_type}/{self.victim_task}_PaRaMSed_{protection_type}.pt'
-            else:
-                paths['victim_protected'] = f'modified_models/{self.model}/{self.victim_task}/perm_{protection_type}/{self.victim_task}_PaRaMSed_{protection_type}.pt'
+            protection_config = f'perm_{protection_type}'
+            paths['victim_protected'] = get_modified_model_path(
+                self.model, self.victim_task, protection_config, protection_type
+            )
         else:
             # Fallback to old naming for compatibility
-            paths['victim_protected'] = f'modified_models/{self.model}/{self.victim_task}/perm_scaling/{self.victim_task}_PaRaMSed.pt'
+            paths['victim_protected'] = get_modified_model_path(
+                self.model, self.victim_task, 'perm_scaling', 'scaling'
+            )
         
         return paths
     
@@ -129,12 +148,13 @@ class AutoVictimEvaluator:
         print(f"\n Evaluating {protection_type} protection for {self.victim_task}")
         print("="*60)
         
-        # Create log directory
-        log_dir = f'{self.output_dir}/{self.model}/{self.victim_task}_victim_eval_{protection_type}_{self.timestamp}/'
-        os.makedirs(log_dir, exist_ok=True)
+        # Create log directory using new evaluation log naming
+        log_file_path = get_evaluation_log_path('AutoTA', self.model, self.victim_task, protection_type)
+        log_dir = os.path.dirname(log_file_path)
+        ensure_dir_exists(log_dir)
         
-        # Create logger
-        log = create_log_dir(log_dir, f'auto_victim_eval_{protection_type}.txt')
+        # Create logger with new naming convention
+        log = create_log_dir(log_dir, os.path.basename(log_file_path))
         log.info(f"Starting automated victim evaluation: {self.victim_task} vs All Tasks")
         log.info(f"Model: {self.model}, Protection: {protection_type}")
         log.info(f"Timestamp: {self.timestamp}")
@@ -165,8 +185,8 @@ class AutoVictimEvaluator:
                 free_rider_tv = TaskVector(paths['pretrained'], paths['free_rider'])
                 
                 # Load models for single task evaluation
-                free_rider_encoder = torch.load(paths['free_rider'])
-                protected_victim_encoder = torch.load(paths['victim_protected'])
+                free_rider_encoder = torch.load(paths['free_rider'], weights_only=False).to(self.args.device)
+                protected_victim_encoder = torch.load(paths['victim_protected'], weights_only=False).to(self.args.device)
                 
                 # Evaluate single task performance
                 log.info(f" Single Task Performance:")
@@ -196,8 +216,8 @@ class AutoVictimEvaluator:
                     protected_merged_tv = sum([victim_protected_tv, free_rider_tv])
                     
                     # Apply to pretrained model
-                    benign_merged_encoder = benign_merged_tv.apply_to(paths['pretrained'], scaling_coef=scaling_factor)
-                    protected_merged_encoder = protected_merged_tv.apply_to(paths['pretrained'], scaling_coef=scaling_factor)
+                    benign_merged_encoder = benign_merged_tv.apply_to(paths['pretrained'], scaling_coef=scaling_factor).to(self.args.device)
+                    protected_merged_encoder = protected_merged_tv.apply_to(paths['pretrained'], scaling_coef=scaling_factor).to(self.args.device)
                     
                     # Evaluate merged models
                     # Benign merge results
@@ -237,7 +257,7 @@ class AutoVictimEvaluator:
                 
                 # Store free-rider results
                 protection_results['free_rider_evaluations'][free_rider_task] = free_rider_results
-                log.info(f"✅ Completed evaluation against {free_rider_task}")
+                log.info(f" Completed evaluation against {free_rider_task}")
                 
             except Exception as e:
                 log.error(f"Error evaluating against {free_rider_task}: {str(e)}")
@@ -254,8 +274,14 @@ class AutoVictimEvaluator:
         Returns:
             Dict: Complete evaluation results
         """
-        print(f"\nStarting automated victim evaluation")
-        print(f"Victim Task: {self.victim_task}")
+        # Validate paths before starting
+        if not validate_paths():
+            print(" Path validation failed. Please check your configuration in src/config/paths.py")
+            return {}
+        
+        print(f"\n Starting automated victim evaluation")
+        print_path_config()
+        print(f"\nVictim Task: {self.victim_task}")
         print(f"Model: {self.model}")
         print(f"Protection Types: {', '.join(self.protection_types)}")
         print(f"Free-rider Tasks: {', '.join(self.free_rider_tasks)}")
@@ -265,9 +291,11 @@ class AutoVictimEvaluator:
             protection_results = self.evaluate_single_protection_type(protection_type)
             self.results['evaluations'][protection_type] = protection_results
         
-        # Save comprehensive results
-        results_file = f'{self.output_dir}/{self.model}/{self.victim_task}_victim_eval_summary_{self.timestamp}.json'
-        os.makedirs(os.path.dirname(results_file), exist_ok=True)
+        # Save comprehensive results in evaluation directory
+        results_filename = f'AutoTA_{self.model}_{self.victim_task}_summary_{self.timestamp}.json'
+        from src.config.paths import EVALUATION_RESULTS_ROOT
+        results_file = os.path.join(EVALUATION_RESULTS_ROOT, results_filename)
+        ensure_dir_exists(os.path.dirname(results_file))
         
         with open(results_file, 'w') as f:
             json.dump(self.results, f, indent=2)
@@ -314,38 +342,26 @@ class AutoVictimEvaluator:
                     print(f"   Free-rider disruption: {best_results['protection_metrics']['free_rider_disruption_pct']:.1f}%")
 
 
-def parse_eval_arguments():
-    """Parse command line arguments for automated victim evaluation."""
-    parser = argparse.ArgumentParser(description='Automated victim task merging evaluation')
-    
-    parser.add_argument('--victim-task', type=str, required=True,
-                       choices=['Cars', 'RESISC45', 'EuroSAT', 'SVHN', 'GTSRB', 'MNIST', 'DTD'],
-                       help='Victim task to evaluate')
-    
-    parser.add_argument('--model', type=str, required=True,
-                       choices=['ViT-B-16', 'ViT-B-32', 'ViT-L-14'],
-                       help='Model architecture to evaluate')
-    
-    parser.add_argument('--protection-types', nargs='+',
-                       choices=['diagonal', 'symmetric', 'nonsymmetric'],
-                       default=['nonsymmetric'],
-                       help='PaRaMS protection types to evaluate')
-    
-    parser.add_argument('--scaling-factors', nargs='+', type=float,
-                       default=[0.3, 0.4, 0.5, 0.6, 0.7, 0.8],
-                       help='Task arithmetic scaling factors to test')
-    
-    parser.add_argument('--output-dir', type=str, default='logs',
-                       help='Output directory for logs and results')
-    
-    parser.add_argument('--summary-only', action='store_true',
-                       help='Only print summary without running evaluation')
-    
-    return parser.parse_args()
+# Removed duplicate parser - now using the unified one from src.task_vectors.args
 
 
 if __name__ == "__main__":
-    args = parse_eval_arguments()
+    args = parse_arguments()
+    
+    # Set defaults for auto evaluation if not provided
+    if not args.victim_task:
+        print("--victim-task is required for auto evaluation")
+        exit(1)
+    
+    if not args.model:
+        print("--model is required for auto evaluation")
+        exit(1)
+    
+    if not args.protection_types:
+        args.protection_types = ['nonsymmetric']
+    
+    if not args.scaling_factors:
+        args.scaling_factors = [0.3, 0.4, 0.5, 0.6, 0.7, 0.8]
     
     # Create evaluator
     evaluator = AutoVictimEvaluator(
@@ -353,7 +369,6 @@ if __name__ == "__main__":
         model=args.model,
         scaling_factors=args.scaling_factors,
         protection_types=args.protection_types,
-        output_dir=args.output_dir
     )
     
     if not args.summary_only:
@@ -366,21 +381,17 @@ if __name__ == "__main__":
         print("Summary-only mode not implemented yet. Please run full evaluation.")
 
 """
-Example usage: 
+Example usage (now using unified argument parser): 
   # Run full evaluation for a victim task
-  python src/eval_merging/auto_victim_eval.py --victim-task Cars --model
-  ViT-B-32
+  python src/eval_merging/auto_victim_eval_TA.py --victim-task Cars --model ViT-B-32
 
-  # Defind scaling type & scaling factors
-  python src/eval_merging/auto_victim_eval.py \
-      --victim-task MNIST \
+  # Define protection types & scaling factors
+  python src/eval_merging/auto_victim_eval_TA.py \
+      --victim-task Cars \
       --model ViT-B-32 \
-      --protection-types diagonal symmetric nonsymmetric \
-      --scaling-factors 0.4 0.5 0.6 0.7
+      --protection-types symmetric nonsymmetric \
+      --scaling-factors 0.3 0.8
 
-  # Define output directory
-  python src/eval_merging/auto_victim_eval.py \
-      --victim-task DTD \
-      --model ViT-B-16 \
-      --output-dir my_eval_logs
+  # All arguments are now unified in src.task_vectors.args
+  # Output directory configured in src/config/paths.py
 """
