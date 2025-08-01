@@ -183,6 +183,12 @@ def parse_arguments():
         help='Victim task to evaluate (for auto evaluation)'
     )
     parser.add_argument(
+        "--free-rider-task",
+        type=str,
+        choices=['Cars', 'RESISC45', 'EuroSAT', 'SVHN', 'GTSRB', 'MNIST', 'DTD'],
+        help='Free rider task for binary evaluation'
+    )
+    parser.add_argument(
         "--protection-types",
         nargs='+',
         choices=['diagonal', 'symmetric', 'nonsymmetric'],
@@ -201,6 +207,25 @@ def parse_arguments():
         action='store_true',
         help='Only print summary without running evaluation',
         default=False
+    )
+    parser.add_argument(
+        "--sparsity-ratio",
+        type=float,
+        default=None,
+        help='Sparsity ratio for WANDA pruning (if not specified, uses original protected model without WANDA)'
+    )
+    parser.add_argument(
+        "--use-recovered",
+        action='store_true',
+        help='Use recovered model (with _recovered suffix) instead of original protected model',
+        default=False
+    )
+    parser.add_argument(
+        "--recovery-method",
+        type=str,
+        choices=['rowwise', 'blockwise', 'svd'],
+        default='svd',
+        help='Attention recovery method: rowwise (for diagonal), blockwise (original), or svd (numerically stable, default)'
     )
     parsed_args = parser.parse_args()
     parsed_args.device = "cuda" if torch.cuda.is_available() else "cpu"

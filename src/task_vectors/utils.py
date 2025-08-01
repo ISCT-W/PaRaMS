@@ -25,7 +25,7 @@ def create_log_dir(path, filename='record.txt'):
     if logger.hasHandlers():
         logger.handlers.clear()
     logger.setLevel(logging.DEBUG)
-    hdlf = logging.FileHandler(path + '/' + filename)
+    hdlf = logging.FileHandler(path + '/' + filename, mode='w')
     hdlf.setLevel(logging.DEBUG)
     hdls = logging.StreamHandler()
     hdls.setLevel(logging.DEBUG)

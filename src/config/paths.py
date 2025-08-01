@@ -15,7 +15,7 @@ from typing import Optional
 
 # Root directory where all models and data are stored
 # Modify this to point to your actual storage location
-MODEL_DATA_ROOT = "/gs/bs/tga-mdl/Wei_mdl/params"  
+MODEL_DATA_ROOT = "path/to/your/model_data_storage"
 
 # Use environment variable if available
 # MODEL_DATA_ROOT = os.environ.get('PARAMS_MODEL_ROOT', '/path/to/your/model_data_storage')
@@ -88,7 +88,7 @@ def get_evaluation_log_path(
     protection_type: str
 ) -> str:
     """
-    Get the path for evaluation log files using the new naming convention.
+    Get the path for evaluation log files using hierarchical directory structure.
     
     Args:
         merge_method (str): Merging method ('TA', 'TIES', 'AdaMerging', etc.)
@@ -101,15 +101,24 @@ def get_evaluation_log_path(
         
     Example:
         >>> get_evaluation_log_path('TA', 'ViT-B-32', 'Cars', 'perm_nonsymmetric')
-        '/path/to/repo/results/evaluation/TA_ViT-B-32_Cars_perm-nonsymmetric.log'
+        '/path/to/repo/results/evaluation/ViT-B-32/Cars/nonsymmetric_TA.log'
     """
-    # Format protection type: replace underscores with dashes
-    formatted_protection = protection_type.replace('_', '-')
+    # Extract scaling type from protection type (remove 'perm_' prefix)
+    if protection_type.startswith('perm_'):
+        scaling_type = protection_type[5:]  # Remove 'perm_' prefix
+    else:
+        scaling_type = protection_type
     
-    # Generate filename according to new naming rule
-    filename = f"{merge_method}_{model}_{victim_task}_{formatted_protection}.log"
+    # Create hierarchical directory structure: model/victim_task/
+    log_dir = os.path.join(EVALUATION_RESULTS_ROOT, model, victim_task)
     
-    return os.path.join(EVALUATION_RESULTS_ROOT, filename)
+    # Ensure directory exists
+    ensure_dir_exists(log_dir)
+    
+    # Generate filename: {scaling_type}_{merge_method}.log
+    filename = f"{scaling_type}_{merge_method}.log"
+    
+    return os.path.join(log_dir, filename)
 
 def get_modification_log_path(model: str, task: str, protection_type: str) -> str:
     """
@@ -182,7 +191,7 @@ def validate_paths() -> bool:
         
         return True
     except Exception as e:
-        print(f"❌ Path validation failed: {e}")
+        print(f" Path validation failed: {e}")
         print(f"Please check your MODEL_DATA_ROOT configuration: {MODEL_DATA_ROOT}")
         return False
 
@@ -192,7 +201,7 @@ def validate_paths() -> bool:
 
 def print_path_config():
     """Print current path configuration for debugging."""
-    print("🗂️  PaRaMS Path Configuration:")
+    print("PaRaMS Path Configuration:")
     print("=" * 50)
     print(f"Model & Data Root: {MODEL_DATA_ROOT}")
     print(f"Checkpoints:       {CHECKPOINTS_ROOT}")
@@ -206,10 +215,10 @@ def print_path_config():
     # Check accessibility
     paths_valid = validate_paths()
     if paths_valid:
-        print("✅ All paths are accessible")
+        print("All paths are accessible")
     else:
-        print("❌ Some paths are not accessible")
-        print("💡 Please update MODEL_DATA_ROOT in src/config/paths.py")
+        print("Some paths are not accessible")
+        print("Please update MODEL_DATA_ROOT in src/config/paths.py")
     
     return paths_valid
 
@@ -222,7 +231,7 @@ if __name__ == "__main__":
     print_path_config()
     
     # Example path generation
-    print("\n📁 Example Paths:")
+    print("\nExample Paths:")
     print("-" * 30)
     
     # Checkpoint paths
@@ -235,6 +244,11 @@ if __name__ == "__main__":
     print(f"  Cars nonsymmetric:   {get_modified_model_path('ViT-B-32', 'Cars', 'perm_nonsymmetric')}")
     print(f"  MNIST symmetric:     {get_modified_model_path('ViT-B-32', 'MNIST', 'perm_symmetric')}")
     
-    # Log paths
-    print("\nLogs:")
-    print(f"  Cars evaluation:     {get_log_path('ViT-B-32', 'Cars', 'victim_eval_20240727')}")
+    # Evaluation log paths
+    print("\nEvaluation Logs:")
+    print(f"  Cars TA evaluation:     {get_evaluation_log_path('TA', 'ViT-B-32', 'Cars', 'perm_nonsymmetric')}")
+    print(f"  MNIST TIES evaluation:  {get_evaluation_log_path('TIES', 'ViT-B-32', 'MNIST', 'perm_symmetric')}")
+    
+    # Modification log paths  
+    print("\nModification Logs:")
+    print(f"  Cars modification:      {get_modification_log_path('ViT-B-32', 'Cars', 'perm_nonsymmetric')}")

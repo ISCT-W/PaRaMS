@@ -12,6 +12,13 @@ USAGE.md
 src/config/__init__.py
 PATH_CONFIGURATION.md
 .dockerignore
-*/.gitkeep
-results/evaluation/.gitkeep
-results/modification/.gitkeep
+*.gitkeep
+*.sh
+PaRaMS_run.*
+/extensions/
+/results/
+verify_pruning.py
+ViT-B-32_state_dict_keys.txt
+*.DS_Store
+prune_adaptive_eval.py
+binary_eval.py

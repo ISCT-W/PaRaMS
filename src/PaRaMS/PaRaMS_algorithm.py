@@ -238,7 +238,7 @@ def apply_attention_qkvw_scaling(
             raise ValueError("Unsupported mode. Use 'log_uniform', 'beta', or 'uniform'.")
 
     alpha = sample_factors(d_k, mode, scale_min, scale_max, rng)
-    gamma = sample_factors(d_k, mode, scale_min, scale_max, rng)
+    # gamma = sample_factors(d_k, mode, scale_min, scale_max, rng)
 
     for i in range(d_k):
         Q_weight[i, :] *= alpha[i]
@@ -247,9 +247,12 @@ def apply_attention_qkvw_scaling(
         K_weight[i, :] *= 1.0 / alpha[i]
         K_bias[i] *= 1.0 / alpha[i]
 
-        V_weight[i, :] *= gamma[i]
-        V_bias[i] *= gamma[i]
-        W_out_proj[:, i] *= 1.0 / gamma[i]
+        # V_weight[i, :] *= gamma[i]
+        # V_bias[i] *= gamma[i]
+        # W_out_proj[:, i] *= 1.0 / gamma[i]
+        V_weight[i, :] *= alpha[i]
+        V_bias[i] *= alpha[i]
+        W_out_proj[:, i] *= 1.0 / alpha[i]
 
     W_in_proj[0: d_k, :] = Q_weight
     W_in_proj[d_k: 2 * d_k, :] = K_weight
