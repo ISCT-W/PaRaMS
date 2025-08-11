@@ -22,3 +22,9 @@ ViT-B-32_state_dict_keys.txt
 *.DS_Store
 prune_adaptive_eval.py
 binary_eval.py
+data_download.py
+model_download.py
+apply_wanda_pruning.py
+apply_advanced_wanda.py
+adapters/
+src/config/paths.py

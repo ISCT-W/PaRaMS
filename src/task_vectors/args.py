@@ -211,7 +211,7 @@ def parse_arguments():
     parser.add_argument(
         "--sparsity-ratio",
         type=float,
-        default=None,
+        default=0.2,
         help='Sparsity ratio for WANDA pruning (if not specified, uses original protected model without WANDA)'
     )
     parser.add_argument(
